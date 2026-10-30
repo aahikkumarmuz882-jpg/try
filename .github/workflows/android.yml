@@ -1,27 +1,894 @@
-name: Android CI
+name: Build Ultimate Sikha AI Master APK
 
 on:
   push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+    branches: [ "main", "master" ]
+  workflow_dispatch:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v4
-    - name: set up JDK 11
-      uses: actions/setup-java@v4
-      with:
-        java-version: '11'
-        distribution: 'temurin'
-        cache: gradle
+      - name: Checkout Repo
+        uses: actions/checkout@v4
 
-    - name: Grant execute permission for gradlew
-      run: chmod +x gradlew
-    - name: Build with Gradle
-      run: ./gradlew build
-      
+      - name: Set up Project Files
+        run: |
+          rm -rf app build.gradle.kts settings.gradle.kts gradle.properties
+          mkdir -p app/src/main/java/com/sikha/assistant
+          mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/drawable
+
+          echo 'pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }' > settings.gradle.kts
+          echo 'dependencyResolutionManagement { repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS); repositories { google(); mavenCentral() } }' >> settings.gradle.kts
+          echo 'rootProject.name = "SikhaAIMaster"; include(":app")' >> settings.gradle.kts
+
+          echo 'plugins { id("com.android.application") version "8.2.2" apply false; id("org.jetbrains.kotlin.android") version "1.9.22" apply false }' > build.gradle.kts
+
+          echo 'org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8' > gradle.properties
+          echo 'android.useAndroidX=true' >> gradle.properties
+          echo 'kotlin.code.style=official' >> gradle.properties
+          echo 'android.nonTransitiveRClass=true' >> gradle.properties
+
+          echo 'plugins { id("com.android.application"); id("org.jetbrains.kotlin.android") }' > app/build.gradle.kts
+          echo 'android { namespace = "com.sikha.assistant"; compileSdk = 34; defaultConfig { applicationId = "com.sikha.assistant"; minSdk = 26; targetSdk = 34; versionCode = 7; versionName = "7.0-Live" }; compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }; kotlinOptions { jvmTarget = "17" }; buildFeatures { compose = true }; composeOptions { kotlinCompilerExtensionVersion = "1.5.8" } }' >> app/build.gradle.kts
+          echo 'dependencies { implementation("androidx.core:core-ktx:1.12.0"); implementation("androidx.appcompat:appcompat:1.6.1"); implementation("com.google.android.material:material:1.11.0"); implementation("androidx.activity:activity-compose:1.8.2"); implementation(platform("androidx.compose:compose-bom:2024.02.00")); implementation("androidx.compose.ui:ui"); implementation("androidx.compose.material3:material3"); implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0"); implementation("com.google.ai.client.generativeai:generativeai:0.9.0"); implementation("com.squareup.okhttp3:okhttp:4.12.0") }' >> app/build.gradle.kts
+
+          echo '<?xml version="1.0" encoding="utf-8"?><resources><style name="Theme.SikhaMaster" parent="Theme.AppCompat.DayNight.NoActionBar"><item name="android:statusBarColor">#06080F</item></style></resources>' > app/src/main/res/values/styles.xml
+
+          if [ -f "logo.png" ]; then
+            cp logo.png app/src/main/res/drawable/sikha_logo.png
+            ICON_ATTR='android:icon="@drawable/sikha_logo"'
+          else
+            ICON_ATTR='android:icon="@android:drawable/sym_def_app_icon"'
+          fi
+
+          cat << EOF > app/src/main/AndroidManifest.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
+              <uses-permission android:name="android.permission.CAMERA" />
+              <uses-permission android:name="android.permission.FLASHLIGHT" />
+              <uses-permission android:name="android.permission.CALL_PHONE" />
+              <uses-permission android:name="android.permission.BLUETOOTH" />
+              <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+              <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+              <queries>
+                  <package android:name="com.whatsapp" />
+                  <package android:name="com.google.android.youtube" />
+                  <package android:name="com.instagram.android" />
+                  <intent>
+                      <action android:name="android.speech.RecognitionService" />
+                  </intent>
+                  <intent>
+                      <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
+                  </intent>
+                  <intent>
+                      <action android:name="android.intent.action.TTS_SERVICE" />
+                  </intent>
+              </queries>
+              <application
+                  android:allowBackup="false"
+                  $ICON_ATTR
+                  android:label="Sikha AI Master"
+                  android:supportsRtl="true"
+                  android:theme="@style/Theme.SikhaMaster">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:showWhenLocked="true"
+                      android:turnScreenOn="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+      - name: Create MainActivity
+        run: |
+          cat << 'EOF' > app/src/main/java/com/sikha/assistant/MainActivity.kt
+          package com.sikha.assistant
+
+          import android.Manifest
+          import android.content.Context
+          import android.content.Intent
+          import android.content.pm.PackageManager
+          import android.hardware.camera2.CameraManager
+          import android.media.MediaPlayer
+          import android.os.Bundle
+          import android.os.Handler
+          import android.os.Looper
+          import android.speech.RecognitionListener
+          import android.speech.RecognizerIntent
+          import android.speech.SpeechRecognizer
+          import android.speech.tts.TextToSpeech
+          import android.speech.tts.UtteranceProgressListener
+          import android.view.WindowManager
+          import androidx.activity.ComponentActivity
+          import androidx.activity.compose.BackHandler
+          import androidx.activity.compose.setContent
+          import androidx.activity.result.contract.ActivityResultContracts
+          import androidx.compose.animation.core.*
+          import androidx.compose.foundation.Canvas
+          import androidx.compose.foundation.background
+          import androidx.compose.foundation.layout.*
+          import androidx.compose.foundation.rememberScrollState
+          import androidx.compose.foundation.shape.CircleShape
+          import androidx.compose.foundation.verticalScroll
+          import androidx.compose.material3.*
+          import androidx.compose.runtime.*
+          import androidx.compose.ui.Alignment
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.geometry.Offset
+          import androidx.compose.ui.graphics.Brush
+          import androidx.compose.ui.graphics.Color
+          import androidx.compose.ui.graphics.StrokeCap
+          import androidx.compose.ui.graphics.drawscope.Stroke
+          import androidx.compose.ui.graphics.drawscope.rotate
+          import androidx.compose.ui.text.TextStyle
+          import androidx.compose.ui.text.font.FontWeight
+          import androidx.compose.ui.text.input.PasswordVisualTransformation
+          import androidx.compose.ui.text.input.VisualTransformation
+          import androidx.compose.ui.unit.dp
+          import androidx.compose.ui.unit.sp
+          import androidx.core.content.ContextCompat
+          import androidx.lifecycle.lifecycleScope
+          import com.google.ai.client.generativeai.GenerativeModel
+          import kotlinx.coroutines.Dispatchers
+          import kotlinx.coroutines.launch
+          import kotlinx.coroutines.withContext
+          import okhttp3.MediaType.Companion.toMediaType
+          import okhttp3.OkHttpClient
+          import okhttp3.Request
+          import okhttp3.RequestBody.Companion.toRequestBody
+          import org.json.JSONArray
+          import org.json.JSONObject
+          import java.io.File
+          import java.util.Locale
+          import java.util.concurrent.TimeUnit
+
+          data class Voice(val name: String, val id: String)
+
+          class MainActivity : ComponentActivity() {
+
+              private val DEFAULT_VOICE_ID = "RDWdsTU6N02BFftbIEAp"
+              private val handler = Handler(Looper.getMainLooper())
+              private val prefs by lazy { getSharedPreferences("sikha_prefs", Context.MODE_PRIVATE) }
+              private val client by lazy {
+                  OkHttpClient.Builder()
+                      .connectTimeout(20, TimeUnit.SECONDS)
+                      .readTimeout(40, TimeUnit.SECONDS)
+                      .build()
+              }
+
+              private var recognizer: SpeechRecognizer? = true 
+              private var player: MediaPlayer? = null
+              private var tts: TextToSpeech? = true 
+              private var ttsReady = false
+              private val history = mutableListOf<Pair<String, String>>()
+
+              private var liveMode by mutableStateOf(false)
+              private var isListening by mutableStateOf(false)
+              private var isSpeaking by mutableStateOf(false)
+              private var isThinking by mutableStateOf(false)
+              private var showSettings by mutableStateOf(false)
+              private var statusText by mutableStateOf("Hello Boss! Mic dabao, live baat karte hain.")
+
+              private val micPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+                  if (granted) {
+                      listen()
+                  } else {
+                      liveMode = false
+                      statusText = "Boss, mic ki permission chahiye. Phone Settings se Microphone allow karo."
+                  }
+              }
+
+              private val systemPrompt =
+                  "Tumhara naam Sikha hai. Tum Boss (Kartik) ki intelligent, caring aur loyal virtual assistant ho. Hamesha sirf 'Boss' kehkar baat karo, Hinglish mein, aur chhota, pyara aur smart jawab do (2-3 chhote vaakya)."
+
+              private fun pref(name: String, default: String = ""): String =
+                  prefs.getString(name, default) ?: default
+
+              private fun loadVoices(): List<Voice> {
+                  val list = mutableListOf<Voice>()
+                  try {
+                      val arr = JSONArray(pref("voices", "[]"))
+                      for (i in 0 until arr.length()) {
+                          val o = arr.getJSONObject(i)
+                          val id = o.optString("id").trim()
+                          if (id.isNotEmpty()) {
+                              val nm = o.optString("name").trim()
+                              list.add(Voice(if (nm.isEmpty()) "Voice " + (i + 1) else nm, id))
+                          }
+                      }
+                  } catch (_: Exception) {}
+                  if (list.isEmpty()) list.add(Voice("Sikha", DEFAULT_VOICE_ID))
+                  return list
+              }
+
+              private fun activeVoiceId(): String {
+                  val voices = loadVoices()
+                  val saved = pref("active_voice_id")
+                  return voices.firstOrNull { it.id == saved }?.id ?: voices[0].id
+              }
+
+              private fun saveSettings(
+                  gemini: String, openai: String, claude: String, eleven: String,
+                  provider: String, voices: List<Voice>, activeId: String
+              ): Boolean {
+                  val arr = JSONArray()
+                  voices.forEach { arr.put(JSONObject().put("name", it.name).put("id", it.id)) }
+                  val ok = prefs.edit()
+                      .putString("AQ.Ab8RN6JvXiUC57f4xfeU14DZzCZIxXvZwHqiXERIbxIBxa91sw", gemini.trim())
+                      .putString("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", openai.trim())
+                      .putString("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", claude.trim())
+                      .putString("sk_3afc3a6fe8ea026ea110b1e22754f2888ced2d5140b56259", eleven.trim())
+                      .putString("provider", provider)
+                      .putString("voices", arr.toString())
+                      .putString("active_voice_id", activeId)
+                      .commit()
+                  return ok && pref("eleven_key") == eleven.trim() && pref("gemini_key") == gemini.trim()
+              }
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+                  tts = TextToSpeech(this) { s ->
+                      if (s == TextToSpeech.SUCCESS) {
+                          val r = tts?.setLanguage(Locale("hi", "IN"))
+                          ttsReady = r != TextToSpeech.LANG_MISSING_DATA && r != TextToSpeech.LANG_NOT_SUPPORTED
+                          tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                              override fun onStart(utteranceId: String?) {}
+                              override fun onDone(utteranceId: String?) { runOnUiThread { finishSpeaking() } }
+                              override fun onError(utteranceId: String?) { runOnUiThread { finishSpeaking() } }
+                          })
+                      }
+                  }
+
+                  if (pref("gemini_key").isBlank() && pref("openai_key").isBlank() && pref("claude_key").isBlank()) {
+                      statusText = "Boss, pehle upar Settings mein API key daalo."
+                  }
+
+                  setContent {
+                      MaterialTheme {
+                          BackHandler(enabled = showSettings) { showSettings = false }
+                          if (showSettings) SettingsScreen() else MasterLiveScreen()
+                      }
+                  }
+              }
+
+              // ---------------- SETTINGS SCREEN ----------------
+
+              @Composable
+              fun SettingsScreen() {
+                  var gemini by remember { mutableStateOf(pref("gemini_key")) }
+                  var openai by remember { mutableStateOf(pref("openai_key")) }
+                  var claude by remember { mutableStateOf(pref("claude_key")) }
+                  var eleven by remember { mutableStateOf(pref("eleven_key")) }
+                  var provider by remember { mutableStateOf(pref("provider", "gemini")) }
+                  val voices = remember { mutableStateListOf<Voice>().apply { addAll(loadVoices()) } }
+                  var activeId by remember { mutableStateOf(activeVoiceId()) }
+                  var newName by remember { mutableStateOf("") }
+                  var newId by remember { mutableStateOf("") }
+                  var msg by remember { mutableStateOf("") }
+
+                  fun saveNow(): Boolean {
+                      val safeActive = voices.firstOrNull { it.id == activeId }?.id ?: voices[0].id
+                      return saveSettings(gemini, openai, claude, eleven, provider, voices.toList(), safeActive)
+                  }
+
+                  Column(
+                      modifier = Modifier
+                          .fillMaxSize()
+                          .background(Color(0xFF06080F))
+                          .verticalScroll(rememberScrollState())
+                          .padding(24.dp)
+                  ) {
+                      Spacer(modifier = Modifier.height(24.dp))
+                      Text("Settings", color = Color(0xFFFFD54F), fontWeight = FontWeight.Bold, fontSize = 22.sp)
+                      Spacer(modifier = Modifier.height(20.dp))
+
+                      Text("Main AI kaun sa chale", color = Color(0xFFFFFAED), fontSize = 15.sp)
+                      listOf("gemini" to "Gemini", "openai" to "OpenAI", "claude" to "Claude").forEach { (id, label) ->
+                          Row(verticalAlignment = Alignment.CenterVertically) {
+                              RadioButton(selected = provider == id, onClick = { provider = id })
+                              Text(label, color = Color(0xFFFFFAED), fontSize = 15.sp)
+                          }
+                      }
+                      Text(
+                          "Agar main AI na chale to baaki wale apne aap try honge (jinki key saved hai).",
+                          color = Color(0xFF9E9E9E),
+                          fontSize = 12.sp
+                      )
+
+                      Spacer(modifier = Modifier.height(16.dp))
+                      KeyField("Gemini API key", gemini, true) { gemini = it }
+                      KeyField("OpenAI API key", openai, true) { openai = it }
+                      KeyField("Claude API key", claude, true) { claude = it }
+                      KeyField("ElevenLabs API key", eleven, true) { eleven = it }
+
+                      Spacer(modifier = Modifier.height(20.dp))
+                      Text("ElevenLabs Voices (jo select karoge wahi bolegi)", color = Color(0xFFFFD54F), fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                      Spacer(modifier = Modifier.height(6.dp))
+
+                      voices.forEach { v ->
+                          Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                              RadioButton(selected = activeId == v.id, onClick = { activeId = v.id })
+                              Column(modifier = Modifier.weight(1f)) {
+                                  Text(v.name, color = Color(0xFFFFFAED), fontSize = 15.sp)
+                                  Text(v.id, color = Color(0xFF9E9E9E), fontSize = 11.sp)
+                              }
+                              if (voices.size > 1) {
+                                  TextButton(onClick = {
+                                      voices.remove(v)
+                                      if (activeId == v.id) activeId = voices[0].id
+                                  }) { Text("Hatao", color = Color(0xFFFF5252)) }
+                              }
+                          }
+                      }
+
+                      Spacer(modifier = Modifier.height(8.dp))
+                      KeyField("Nayi voice ka naam", newName, false) { newName = it }
+                      KeyField("Nayi Voice ID", newId, false) { newId = it }
+                      Button(
+                          onClick = {
+                              val id = newId.trim()
+                              if (id.isEmpty()) {
+                                  msg = "Voice ID khali hai Boss."
+                              } else if (voices.any { it.id == id }) {
+                                  msg = "Ye Voice ID pehle se hai."
+                              } else {
+                                  val nm = newName.trim()
+                                  voices.add(Voice(if (nm.isEmpty()) "Voice " + (voices.size + 1) else nm, id))
+                                  newName = ""
+                                  newId = ""
+                                  msg = "Voice jud gayi. Ab neeche Save karo."
+                              }
+                          },
+                          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFB300)),
+                          modifier = Modifier.fillMaxWidth()
+                      ) { Text("Voice jodo", color = Color.Black, fontWeight = FontWeight.Bold) }
+
+                      if (msg.isNotEmpty()) {
+                          Spacer(modifier = Modifier.height(8.dp))
+                          Text(msg, color = Color(0xFF00E676), fontSize = 13.sp)
+                      }
+
+                      Spacer(modifier = Modifier.height(20.dp))
+                      Button(
+                          onClick = {
+                              if (saveNow()) {
+                                  statusText = "Settings save ho gayi Boss. Ab mic dabao."
+                                  showSettings = false
+                              } else {
+                                  msg = "Save nahi hua Boss, fir se try karo."
+                              }
+                          },
+                          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676)),
+                          modifier = Modifier.fillMaxWidth()
+                      ) { Text("Save karo", color = Color.Black, fontWeight = FontWeight.Bold) }
+
+                      Button(
+                          onClick = {
+                              if (saveNow()) {
+                                  statusText = "Settings save ho gayi Boss. Voice test chal raha hai."
+                                  showSettings = false
+                                  speak("Namaste Boss, main Sikha hoon. Meri awaaz aur settings sab theek kaam kar rahi hain.")
+                              } else {
+                                  msg = "Save nahi hua Boss, fir se try karo."
+                              }
+                          },
+                          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF8F00)),
+                          modifier = Modifier.fillMaxWidth()
+                      ) { Text("Save karo aur voice test karo", color = Color.Black, fontWeight = FontWeight.Bold) }
+
+                      TextButton(onClick = { showSettings = false }, modifier = Modifier.fillMaxWidth()) {
+                          Text("Bina save kiye wapas jao", color = Color(0xFFFFB300))
+                      }
+                      Spacer(modifier = Modifier.height(24.dp))
+                  }
+              }
+
+              @Composable
+              fun KeyField(label: String, value: String, secret: Boolean, onChange: (String) -> Unit) {
+                  OutlinedTextField(
+                      value = value,
+                      onValueChange = onChange,
+                      label = { Text(label) },
+                      singleLine = true,
+                      textStyle = TextStyle(color = Color.White, fontSize = 15.sp),
+                      visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
+                      modifier = Modifier
+                          .fillMaxWidth()
+                          .padding(vertical = 6.dp)
+                  )
+              }
+
+              // ---------------- MAIN SCREEN ----------------
+
+              @Composable
+              fun MasterLiveScreen() {
+                  Box(
+                      modifier = Modifier
+                          .fillMaxSize()
+                          .background(Color(0xFF06080F)),
+                      contentAlignment = Alignment.Center
+                  ) {
+                      TextButton(
+                          onClick = { showSettings = true },
+                          modifier = Modifier
+                              .align(Alignment.TopEnd)
+                              .padding(top = 28.dp, end = 12.dp)
+                      ) {
+                          Text("⚙️ Settings", color = Color(0xFFFFB300), fontSize = 15.sp)
+                      }
+
+                      Column(
+                          horizontalAlignment = Alignment.CenterHorizontally,
+                          verticalArrangement = Arrangement.Center,
+                          modifier = Modifier.padding(24.dp)
+                      ) {
+                          Text(
+                              text = "SIKHA MASTER AI",
+                              color = Color(0xFFFFD54F),
+                              fontWeight = FontWeight.Bold,
+                              fontSize = 22.sp
+                          )
+                          Spacer(modifier = Modifier.height(8.dp))
+                          Text(
+                              text = "Boss Edition",
+                              color = Color(0xFF00E676),
+                              fontSize = 13.sp
+                          )
+
+                          Spacer(modifier = Modifier.height(40.dp))
+
+                          JarvisOrb(isActive = isListening || isSpeaking || isThinking)
+
+                          Spacer(modifier = Modifier.height(30.dp))
+
+                          Column(
+                              modifier = Modifier
+                                  .heightIn(max = 170.dp)
+                                  .verticalScroll(rememberScrollState())
+                          ) {
+                              Text(
+                                  text = statusText,
+                                  color = Color(0xFFFFFAED),
+                                  fontSize = 16.sp,
+                                  fontWeight = FontWeight.Medium,
+                                  modifier = Modifier.padding(horizontal = 16.dp)
+                              )
+                          }
+
+                          Spacer(modifier = Modifier.height(30.dp))
+
+                          Button(
+                              onClick = {
+                                  if (liveMode || isListening || isSpeaking) {
+                                      stopAll()
+                                  } else {
+                                      liveMode = true
+                                      listen()
+                                  }
+                              },
+                              shape = CircleShape,
+                              colors = ButtonDefaults.buttonColors(
+                                  containerColor = if (liveMode) Color(0xFF00E676) else Color(0xFFFF8F00)
+                              ),
+                              modifier = Modifier.size(75.dp)
+                          ) {
+                              Text(if (liveMode) "🎙️" else "🎤", fontSize = 30.sp)
+                          }
+                          Spacer(modifier = Modifier.height(8.dp))
+                          Text(
+                              text = if (liveMode) "Live chal raha hai (band karne ko dabao)" else "Live baat shuru karne ko dabao",
+                              color = Color(0xFF9E9E9E),
+                              fontSize = 12.sp
+                          )
+                      }
+                  }
+              }
+
+              @Composable
+              fun JarvisOrb(isActive: Boolean) {
+                  val infiniteTransition = rememberInfiniteTransition(label = "orb")
+                  val angle1 by infiniteTransition.animateFloat(
+                      initialValue = 0f,
+                      targetValue = 360f,
+                      animationSpec = infiniteRepeatable(tween(if (isActive) 2500 else 7000, easing = LinearEasing))
+                  )
+                  val angle2 by infiniteTransition.animateFloat(
+                      initialValue = 360f,
+                      targetValue = 0f,
+                      animationSpec = infiniteRepeatable(tween(if (isActive) 1800 else 5000, easing = LinearEasing))
+                  )
+                  val pulse by infiniteTransition.animateFloat(
+                      initialValue = 0.9f,
+                      targetValue = if (isActive) 1.2f else 1.0f,
+                      animationSpec = infiniteRepeatable(tween(700, easing = FastOutSlowInEasing), RepeatMode.Reverse)
+                  )
+
+                  Canvas(modifier = Modifier.size(220.dp)) {
+                      val center = Offset(size.width / 2, size.height / 2)
+                      val radius = size.minDimension / 2.6f * pulse
+
+                      drawCircle(
+                          brush = Brush.radialGradient(
+                              colors = listOf(Color(0xFFFFD54F), Color(0xFFFF8F00), Color.Transparent),
+                              center = center,
+                              radius = radius
+                          ),
+                          radius = radius,
+                          center = center
+                      )
+
+                      rotate(angle1, center) {
+                          drawArc(
+                              color = Color(0xFFFFB300),
+                              startAngle = 0f,
+                              sweepAngle = 220f,
+                              useCenter = false,
+                              style = Stroke(width = 6.dp.toPx(), cap = StrokeCap.Round)
+                          )
+                      }
+
+                      rotate(angle2, center) {
+                          drawArc(
+                              color = Color(0xFFFFEA00),
+                              startAngle = 50f,
+                              sweepAngle = 140f,
+                              useCenter = false,
+                              style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round)
+                          )
+                      }
+                  }
+              }
+
+              // ---------------- SPEECH RECOGNIZER (LIVE LISTENING) ----------------
+
+              private val listener = object : RecognitionListener {
+                  override fun onReadyForSpeech(params: Bundle?) { isListening = true }
+                  override fun onBeginningOfSpeech() {}
+                  override fun onRmsChanged(rmsdB: Float) {}
+                  override fun onBufferReceived(buffer: ByteArray?) {}
+                  override fun onEndOfSpeech() { isListening = false }
+                  override fun onError(error: Int) {
+                      isListening = false
+                      when (error) {
+                          SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> {
+                              if (liveMode) handler.postDelayed({
+                                  if (liveMode && !isSpeaking && !isThinking && !isListening) listen()
+                              }, 400)
+                          }
+                          SpeechRecognizer.ERROR_RECOGNIZER_BUSY, SpeechRecognizer.ERROR_CLIENT -> {
+                              if (liveMode) handler.postDelayed({
+                                  if (liveMode && !isSpeaking && !isThinking && !isListening) listen()
+                              }, 800)
+                          }
+                          SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> {
+                              liveMode = false
+                              statusText = "Boss, mic ki permission do."
+                          }
+                          else -> {
+                              liveMode = false
+                              statusText = "Mic mein dikkat aayi (code " + error + "). Internet check karo aur fir mic dabao."
+                          }
+                      }
+                  }
+                  override fun onResults(results: Bundle?) {
+                      isListening = false
+                      val spoken = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()
+                      if (!spoken.isNullOrBlank()) {
+                          processMasterCommand(spoken)
+                      } else if (liveMode) {
+                          handler.postDelayed({
+                              if (liveMode && !isSpeaking && !isThinking && !isListening) listen()
+                          }, 400)
+                      }
+                  }
+                  override fun onPartialResults(partialResults: Bundle?) {}
+                  override fun onEvent(eventType: Int, params: Bundle?) {}
+              }
+
+              private fun listen() {
+                  if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+                      micPermission.launch(Manifest.permission.RECORD_AUDIO)
+                      return
+                  }
+                  if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+                      liveMode = false
+                      statusText = "Boss, phone mein Google ki voice service nahi mil rahi. Google app ko update ya enable karo."
+                      return
+                  }
+                  stopSpeaking()
+                  try {
+                      recognizer?.destroy()
+                      recognizer = SpeechRecognizer.createSpeechRecognizer(this)
+                      recognizer?.setRecognitionListener(listener)
+                      val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                          putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                          putExtra(RecognizerIntent.EXTRA_LANGUAGE, "hi-IN")
+                          putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
+                      }
+                      statusText = "Sun rahi hoon Boss..."
+                      recognizer?.startListening(intent)
+                  } catch (e: Exception) {
+                      liveMode = false
+                      statusText = "Mic start nahi hua: " + (e.message ?: "unknown")
+                  }
+              }
+
+              private fun stopAll() {
+                  liveMode = false
+                  try { recognizer?.cancel() } catch (_: Exception) {}
+                  stopSpeaking()
+                  isListening = false
+                  isThinking = false
+                  statusText = "Live mode band. Mic dabao to fir shuru."
+              }
+
+              // ---------------- COMMANDS + AI ----------------
+
+              private fun processMasterCommand(query: String) {
+                  statusText = "Boss: \"" + query + "\""
+
+                  if (handleOfflineCommand(query)) return
+
+                  isThinking = true
+                  lifecycleScope.launch(Dispatchers.IO) {
+                      val aiReply = fetchMasterAiReply(query)
+                      withContext(Dispatchers.Main) {
+                          isThinking = false
+                          statusText = aiReply
+                          speak(aiReply)
+                      }
+                  }
+              }
+
+              private fun handleOfflineCommand(query: String): Boolean {
+                  val q = query.lowercase()
+                  try {
+                      val cm = getSystemService(Context.CAMERA_SERVICE) as CameraManager
+                      val cameraId = cm.cameraIdList[0]
+                      if (q.contains("torch on") || q.contains("लाइट ऑन") || q.contains("टॉर्च जला")) {
+                          cm.setTorchMode(cameraId, true)
+                          respondOffline("Torch on kar di hai Boss.")
+                          return true
+                      } else if (q.contains("torch off") || q.contains("लाइट ऑफ") || q.contains("टॉर्च बंद")) {
+                          cm.setTorchMode(cameraId, false)
+                          respondOffline("Torch off kar di hai Boss.")
+                          return true
+                      } else if (q.contains("youtube")) {
+                          startActivity(Intent(Intent.ACTION_SEARCH).apply { setPackage("com.google.android.youtube"); putExtra("query", query) })
+                          respondOffline("YouTube open kar rahi hoon Boss.")
+                          return true
+                      } else if (q.contains("whatsapp")) {
+                          startActivity(packageManager.getLaunchIntentForPackage("com.whatsapp"))
+                          respondOffline("WhatsApp open kar diya Boss.")
+                          return true
+                      } else if (q.contains("instagram")) {
+                          startActivity(packageManager.getLaunchIntentForPackage("com.instagram.android"))
+                          respondOffline("Instagram open kar diya Boss.")
+                          return true
+                      }
+                  } catch (_: Exception) {}
+                  return false
+              }
+
+              private fun respondOffline(text: String) {
+                  statusText = text
+                  speak(text)
+              }
+
+              private suspend fun fetchMasterAiReply(prompt: String): String {
+                  val order = listOf(pref("provider", "gemini"), "gemini", "openai", "claude").distinct()
+                  var lastError = "Boss, koi AI key save nahi hai. Settings mein key daal do."
+                  for (p in order) {
+                      val k = pref(p + "_key")
+                      if (k.isBlank()) continue
+                      try {
+                          val reply = when (p) {
+                              "gemini" -> askGemini(k, prompt)
+                              "openai" -> askOpenAi(k, prompt)
+                              else -> askClaude(k, prompt)
+                          }
+                          if (!reply.isNullOrBlank()) {
+                              history.add("user" to prompt)
+                              history.add("assistant" to reply)
+                              while (history.size > 16) history.removeAt(0)
+                              return reply
+                          }
+                      } catch (e: Exception) {
+                          lastError = "Boss, " + p + " mein dikkat aayi: " + (e.message ?: "unknown")
+                      }
+                  }
+                  return lastError
+              }
+
+              private fun chatMessages(prompt: String, withSystem: Boolean): JSONArray {
+                  val arr = JSONArray()
+                  if (withSystem) arr.put(JSONObject().put("role", "system").put("content", systemPrompt))
+                  history.takeLast(8).forEach { arr.put(JSONObject().put("role", it.first).put("content", it.second)) }
+                  arr.put(JSONObject().put("role", "user").put("content", prompt))
+                  return arr
+              }
+
+              private suspend fun askGemini(key: String, prompt: String): String? {
+                  val sb = StringBuilder(systemPrompt).append("\n")
+                  history.takeLast(8).forEach {
+                      sb.append(if (it.first == "user") "Boss: " else "Sikha: ").append(it.second).append("\n")
+                  }
+                  sb.append("Boss: ").append(prompt).append("\nSikha:")
+                  val model = GenerativeModel(modelName = "gemini-2.5-flash", apiKey = key)
+                  val response = model.generateContent(sb.toString())
+                  return response.text
+              }
+
+              private fun askOpenAi(key: String, prompt: String): String? {
+                  val json = JSONObject().put("model", "gpt-4o-mini").put("messages", chatMessages(prompt, true))
+                  val request = Request.Builder()
+                      .url("https://api.openai.com/v1/chat/completions")
+                      .post(json.toString().toRequestBody("application/json".toMediaType()))
+                      .addHeader("Authorization", "Bearer " + key)
+                      .build()
+                  client.newCall(request).execute().use { response ->
+                      val text = response.body?.string() ?: ""
+                      if (!response.isSuccessful) throw Exception("HTTP " + response.code)
+                      return JSONObject(text).getJSONArray("choices")
+                          .getJSONObject(0).getJSONObject("message").getString("content")
+                  }
+              }
+
+              private fun askClaude(key: String, prompt: String): String? {
+                  val json = JSONObject()
+                      .put("model", "claude-sonnet-5-5")
+                      .put("max_tokens", 400)
+                      .put("system", systemPrompt)
+                      .put("messages", chatMessages(prompt, false))
+                  val request = Request.Builder()
+                      .url("https://api.anthropic.com/v1/messages")
+                      .post(json.toString().toRequestBody("application/json".toMediaType()))
+                      .addHeader("x-api-key", key)
+                      .addHeader("anthropic-version", "2023-06-01")
+                      .build()
+                  client.newCall(request).execute().use { response ->
+                      val text = response.body?.string() ?: ""
+                      if (!response.isSuccessful) throw Exception("HTTP " + response.code)
+                      return JSONObject(text).getJSONArray("content").getJSONObject(0).getString("text")
+                  }
+              }
+
+              // ---------------- VOICE OUTPUT (ElevenLabs + phone voice backup) ----------------
+
+              private fun speak(text: String) {
+                  stopSpeaking()
+                  val key = pref("eleven_key")
+                  if (key.isBlank()) {
+                      speakLocal(text)
+                      return
+                  }
+                  val voiceId = activeVoiceId()
+                  isSpeaking = true
+                  lifecycleScope.launch(Dispatchers.IO) {
+                      var bytes: ByteArray? = null
+                      var err = ""
+                      try {
+                          val json = JSONObject().put("text", text).put("model_id", "eleven_multilingual_v2")
+                          val request = Request.Builder()
+                              .url("https://api.elevenlabs.io/v1/text-to-speech/" + voiceId)
+                              .post(json.toString().toRequestBody("application/json".toMediaType()))
+                              .addHeader("xi-api-key", key)
+                              .addHeader("Accept", "audio/mpeg")
+                              .build()
+                          client.newCall(request).execute().use { response ->
+                              if (response.isSuccessful) {
+                                  bytes = response.body?.bytes()
+                              } else {
+                                  err = "ElevenLabs error " + response.code
+                              }
+                          }
+                      } catch (e: Exception) {
+                          err = "ElevenLabs network error"
+                      }
+                      val data = bytes
+                      withContext(Dispatchers.Main) {
+                          if (data != null && data.isNotEmpty()) {
+                              try {
+                                  val f = File.createTempFile("voice", ".mp3", cacheDir)
+                                  f.writeBytes(data)
+                                  play(f)
+                              } catch (e: Exception) {
+                                  speakLocal(text)
+                              }
+                          } else {
+                              if (err.isNotEmpty()) statusText = statusText + "\n(" + err + ", phone ki voice use kar rahi hoon)"
+                              speakLocal(text)
+                          }
+                      }
+                  }
+              }
+
+              private fun play(file: File) {
+                  try {
+                      val mp = MediaPlayer()
+                      player = mp
+                      mp.setDataSource(file.absolutePath)
+                      mp.setOnPreparedListener { it.start() }
+                      mp.setOnCompletionListener {
+                          try { it.release() } catch (_: Exception) {}
+                          player = null
+                          file.delete()
+                          finishSpeaking()
+                      }
+                      mp.setOnErrorListener { m, _, _ ->
+                          try { m.release() } catch (_: Exception) {}
+                          player = null
+                          finishSpeaking()
+                          true
+                      }
+                      mp.prepareAsync()
+                  } catch (e: Exception) {
+                      finishSpeaking()
+                  }
+              }
+
+              private fun speakLocal(text: String) {
+                  val t = tts
+                  if (t == null || !ttsReady) {
+                      finishSpeaking()
+                      return
+                  }
+                  isSpeaking = true
+                  t.speak(text, TextToSpeech.QUEUE_FLUSH, null, "sikha")
+              }
+
+              private fun stopSpeaking() {
+                  try { player?.release() } catch (_: Exception) {}
+                  player = null
+                  try { tts?.stop() } catch (_: Exception) {}
+                  isSpeaking = false
+              }
+
+              private fun finishSpeaking() {
+                  isSpeaking = false
+                  if (liveMode) handler.postDelayed({
+                      if (liveMode && !isSpeaking && !isListening && !isThinking) listen()
+                  }, 350)
+              }
+
+              override fun onDestroy() {
+                  liveMode = false
+                  try { recognizer?.destroy() } catch (_: Exception) {}
+                  try { player?.release() } catch (_: Exception) {}
+                  try { tts?.shutdown() } catch (_: Exception) {}
+                  super.onDestroy()
+              }
+          }
+          EOF
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.5'
+
+      - name: Build Debug APK
+        run: gradle assembleDebug
+
+      - name: Upload Master APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sikha-Master-Boss-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
